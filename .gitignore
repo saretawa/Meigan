@@ -1,0 +1,41 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build output
+x64/
+x86/
+Debug/
+Release/
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+
+# IntelliSense / browse info
+*.ncb
+*.opendb
+*.db
+*.VC.db
+*.VC.opendb
+ipch/
+*.ipch
+
+# Log files
+*.log
+
+# Compiled resources
+*.res
+*.tlb
+*.tlh
+*.tli
+
+# Misc
+Thumbs.db
+Desktop.ini
