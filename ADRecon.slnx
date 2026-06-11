@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="ADRecon/ADRecon.vcxproj" />
+  <Project Path="ADRecon/ADRecon.vcxproj" Id="e8b0e0b1-55ed-41f2-89fb-93af4efd53e6" />
 </Solution>
