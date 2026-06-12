@@ -41,7 +41,12 @@ void LogHR(const std::wstring& msg, HRESULT hr) {
 }
 
 void LogResult(const std::wstring& msg, const std::wstring& level = L"+") {
-	std::wcout << L"[" << level << L"] " << msg << std::endl;
+	std::wstring color = L"\x1b[0m";
+	if (level == L"+") color = L"\x1b[92m"; // green
+	else if (level == L"-") color = L"\x1b[91m"; // red
+	else if (level == L"!") color = L"\x1b[93m"; // yellow
+	else if (level == L"*") color = L"\x1b[96m"; // cyan
+	std::wcout << color << L"[" << level << L"] " << msg << L"\x1b[0m" << std::endl;
 	if (gOut != &std::wcout)
 		*gOut << L"[" << level << L"] " << msg << std::endl;
 }
@@ -580,7 +585,7 @@ void ACLEnum(std::wstring baseDN, std::wstring dc, std::wstring filterTrustee,
 
 	// ---- INBOUND: who has rights over what ----
 	if (!findings.empty()) {
-		*gOut << L"\n[ACL FINDINGS]" << std::endl;
+		std::wcout << L"\x1b[96m"; *gOut << L"\n[ACL FINDINGS]"; std::wcout << L"\x1b[0m" << std::endl;
 		*gOut << std::wstring(60, L'-') << std::endl;
 		for (auto& f : findings) {
 			bool dcsync = IsDCSync(f.right);
@@ -827,7 +832,7 @@ void GPOMap(std::wstring baseDN, std::wstring dc = L"") {
 		(LPWSTR)L"(&(objectClass=domainDNS)(gpLink=*))"
 	};
 
-	*gOut << L"\n[GPO MAPPING]" << std::endl;
+	std::wcout << L"\x1b[96m"; *gOut << L"\n[GPO MAPPING]"; std::wcout << L"\x1b[0m" << std::endl;
 	*gOut << std::wstring(60, L'-') << std::endl;
 
 	int totalLinks = 0;
@@ -913,7 +918,7 @@ void SessionsEnum(std::wstring baseDN, std::wstring dc) {
 	pSearch->CloseSearchHandle(hSearch);
 	pSearch->Release();
 
-	*gOut << L"\n[SESSIONS]" << std::endl;
+	std::wcout << L"\x1b[96m"; *gOut << L"\n[SESSIONS]"; std::wcout << L"\x1b[0m" << std::endl;
 	*gOut << std::wstring(60, L'-') << std::endl;
 
 	int totalSessions = 0;
@@ -980,7 +985,7 @@ void LocalAdminsEnum(std::wstring baseDN, std::wstring dc) {
 	pSearch->CloseSearchHandle(hSearch);
 	pSearch->Release();
 
-	*gOut << L"\n[LOCAL ADMINS]" << std::endl;
+	std::wcout << L"\x1b[96m"; *gOut << L"\n[LOCAL ADMINS]"; std::wcout << L"\x1b[0m" << std::endl;
 	*gOut << std::wstring(60, L'-') << std::endl;
 
 	int totalFindings = 0;
@@ -1526,7 +1531,7 @@ void SharesEnum(std::wstring baseDN, std::wstring dc) {
 		L"NETLOGON", L"SYSVOL", L"PRINT$", nullptr
 	};
 
-	*gOut << L"\n[SHARES]" << std::endl;
+	std::wcout << L"\x1b[96m"; *gOut << L"\n[SHARES]"; std::wcout << L"\x1b[0m" << std::endl;
 	*gOut << std::wstring(60, L'-') << std::endl;
 
 	int totalShares = 0;
@@ -1717,89 +1722,86 @@ void RBCDEnum(std::wstring baseDN, std::wstring dc) {
 			pSearch->FreeColumn(&col);
 		}
 
-		// Parse the security descriptor to extract which principals are trusted
-		std::wstring trustedBy = L"[unknown]";
+		// Parse msDS-AllowedToActOnBehalfOfOtherIdentity SD
+		std::wstring trustedBy = L"[not readable]";
 		hr = pSearch->GetColumn(hSearch, (LPWSTR)L"msDS-AllowedToActOnBehalfOfOtherIdentity", &col);
 		if (SUCCEEDED(hr)) {
-			if (col.dwADsType == ADSTYPE_OCTET_STRING &&
+			PSECURITY_DESCRIPTOR pSD = nullptr;
+			std::vector<BYTE> sdBuf;
+
+			// Attribute can come back as octet string or NT SD depending on ADSI version
+			if (col.dwADsType == ADSTYPE_NT_SECURITY_DESCRIPTOR &&
+				col.pADsValues->SecurityDescriptor.lpValue) {
+				pSD = (PSECURITY_DESCRIPTOR)col.pADsValues->SecurityDescriptor.lpValue;
+			}
+			else if (col.dwADsType == ADSTYPE_OCTET_STRING &&
 				col.pADsValues->OctetString.lpValue &&
 				col.pADsValues->OctetString.dwLength > 0) {
-				// Copy bytes to local buffer to ensure self-relative format
 				DWORD sdLen = col.pADsValues->OctetString.dwLength;
-				std::vector<BYTE> sdBuf(sdLen);
+				sdBuf.resize(sdLen);
 				memcpy(sdBuf.data(), col.pADsValues->OctetString.lpValue, sdLen);
-				PSECURITY_DESCRIPTOR pSD = (PSECURITY_DESCRIPTOR)sdBuf.data();
+				pSD = (PSECURITY_DESCRIPTOR)sdBuf.data();
+			}
 
-				if (IsValidSecurityDescriptor(pSD)) {
-					PACL pDacl = nullptr;
-					BOOL present = FALSE, defaulted = FALSE;
-					GetSecurityDescriptorDacl(pSD, &present, &pDacl, &defaulted);
-					if (present && pDacl) {
-						ACL_SIZE_INFORMATION info = {};
-						GetAclInformation(pDacl, &info, sizeof(info), AclSizeInformation);
-						std::wstring trustees;
-						for (DWORD ai = 0; ai < info.AceCount; ai++) {
-							LPVOID pAce = nullptr;
-							if (!GetAce(pDacl, ai, &pAce)) continue;
-							ACE_HEADER* hdr = (ACE_HEADER*)pAce;
-							PSID pSid = nullptr;
-							if (hdr->AceType == ACCESS_ALLOWED_ACE_TYPE ||
-								hdr->AceType == ACCESS_DENIED_ACE_TYPE) {
-								pSid = (PSID) & ((ACCESS_ALLOWED_ACE*)pAce)->SidStart;
-							}
-							else if (hdr->AceType == ACCESS_ALLOWED_OBJECT_ACE_TYPE ||
-								hdr->AceType == ACCESS_DENIED_OBJECT_ACE_TYPE) {
-								ACCESS_ALLOWED_OBJECT_ACE* oa = (ACCESS_ALLOWED_OBJECT_ACE*)pAce;
-								DWORD off = 0;
-								if (oa->Flags & ACE_OBJECT_TYPE_PRESENT)           off += sizeof(GUID);
-								if (oa->Flags & ACE_INHERITED_OBJECT_TYPE_PRESENT) off += sizeof(GUID);
-								pSid = (PSID)((PBYTE)&oa->ObjectType + off);
-							}
-							if (!pSid || !IsValidSid(pSid)) continue;
-							if (!trustees.empty()) trustees += L"\n              ";
-							trustees += SidToName(pSid);
+			if (pSD && IsValidSecurityDescriptor(pSD)) {
+				PACL pDacl = nullptr;
+				BOOL present = FALSE, defaulted = FALSE;
+				GetSecurityDescriptorDacl(pSD, &present, &pDacl, &defaulted);
+
+				if (present && pDacl) {
+					ACL_SIZE_INFORMATION info = {};
+					GetAclInformation(pDacl, &info, sizeof(info), AclSizeInformation);
+					std::wstring trustees;
+
+					for (DWORD ai = 0; ai < info.AceCount; ai++) {
+						LPVOID pAce = nullptr;
+						if (!GetAce(pDacl, ai, &pAce)) continue;
+						ACE_HEADER* hdr = (ACE_HEADER*)pAce;
+						PSID pSid = nullptr;
+
+						if (hdr->AceType == ACCESS_ALLOWED_ACE_TYPE ||
+							hdr->AceType == ACCESS_DENIED_ACE_TYPE) {
+							pSid = (PSID) & ((ACCESS_ALLOWED_ACE*)pAce)->SidStart;
 						}
-						if (!trustees.empty()) {
-							trustedBy = trustees;
+						else if (hdr->AceType == ACCESS_ALLOWED_OBJECT_ACE_TYPE ||
+							hdr->AceType == ACCESS_DENIED_OBJECT_ACE_TYPE) {
+							ACCESS_ALLOWED_OBJECT_ACE* oa = (ACCESS_ALLOWED_OBJECT_ACE*)pAce;
+							DWORD off = 0;
+							if (oa->Flags & ACE_OBJECT_TYPE_PRESENT)           off += sizeof(GUID);
+							if (oa->Flags & ACE_INHERITED_OBJECT_TYPE_PRESENT) off += sizeof(GUID);
+							pSid = (PSID)((PBYTE)&oa->ObjectType + off);
 						}
-						else if (info.AceCount > 0) {
-							// ACEs exist but SIDs not resolving — show raw SIDs
-							std::wstring rawSids;
-							for (DWORD ri = 0; ri < info.AceCount; ri++) {
-								LPVOID pAr = nullptr;
-								if (!GetAce(pDacl, ri, &pAr)) continue;
-								ACE_HEADER* hr2 = (ACE_HEADER*)pAr;
-								PSID pSr = nullptr;
-								if (hr2->AceType == ACCESS_ALLOWED_ACE_TYPE)
-									pSr = (PSID) & ((ACCESS_ALLOWED_ACE*)pAr)->SidStart;
-								else if (hr2->AceType == ACCESS_ALLOWED_OBJECT_ACE_TYPE) {
-									ACCESS_ALLOWED_OBJECT_ACE* oa = (ACCESS_ALLOWED_OBJECT_ACE*)pAr;
-									DWORD off = 0;
-									if (oa->Flags & ACE_OBJECT_TYPE_PRESENT)           off += sizeof(GUID);
-									if (oa->Flags & ACE_INHERITED_OBJECT_TYPE_PRESENT) off += sizeof(GUID);
-									pSr = (PSID)((PBYTE)&oa->ObjectType + off);
-								}
-								if (!pSr) continue;
-								LPWSTR sidStr = nullptr;
-								if (ConvertSidToStringSidW(pSr, &sidStr)) {
-									if (!rawSids.empty()) rawSids += L"\n              ";
-									rawSids += std::wstring(sidStr);
-									LocalFree(sidStr);
-								}
-							}
-							if (!rawSids.empty()) trustedBy = rawSids;
-						}
+
+						if (!pSid || !IsValidSid(pSid)) continue;
+
+						// Try name lookup first, fall back to raw SID string
+						std::wstring entry = SidToName(pSid);
+						if (!trustees.empty()) trustees += L"\n              ";
+						trustees += entry;
 					}
+
+					if (!trustees.empty())
+						trustedBy = trustees;
+					else if (info.AceCount == 0)
+						trustedBy = L"[DACL empty]";
+					else
+						trustedBy = L"[" + std::to_wstring(info.AceCount) + L" ACE(s) - SIDs unresolvable]";
 				}
 				else {
-					// Fallback: convert to SDDL string
-					LPWSTR sddl = nullptr;
-					if (ConvertSecurityDescriptorToStringSecurityDescriptorW(
-						pSD, SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &sddl, nullptr) && sddl) {
-						trustedBy = std::wstring(sddl);
-						LocalFree(sddl);
-					}
+					trustedBy = L"[no DACL]";
 				}
+			}
+			else if (pSD) {
+				// SD present but invalid - dump SDDL as fallback
+				LPWSTR sddl = nullptr;
+				if (ConvertSecurityDescriptorToStringSecurityDescriptorW(
+					pSD, SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &sddl, nullptr) && sddl) {
+					trustedBy = L"[raw] " + std::wstring(sddl);
+					LocalFree(sddl);
+				}
+			}
+			else {
+				trustedBy = L"[unrecognized SD type: " + std::to_wstring(col.dwADsType) + L"]";
 			}
 			pSearch->FreeColumn(&col);
 		}
@@ -1839,7 +1841,7 @@ void MAQEnum(std::wstring baseDN, std::wstring dc) {
 	VariantInit(&var);
 	hr = pADs->Get(SysAllocString(L"ms-DS-MachineAccountQuota"), &var);
 
-	*gOut << L"\n[MACHINE ACCOUNT QUOTA]" << std::endl;
+	std::wcout << L"\x1b[96m"; *gOut << L"\n[MACHINE ACCOUNT QUOTA]"; std::wcout << L"\x1b[0m" << std::endl;
 	*gOut << std::wstring(60, L'-') << std::endl;
 
 	if (SUCCEEDED(hr) && var.vt == VT_I4) {
@@ -1868,10 +1870,22 @@ void MAQEnum(std::wstring baseDN, std::wstring dc) {
 
 void PrintUsage() {
 	std::wcout << L"" << std::endl;
-	std::wcout << L"  ADRecon v0.1 - Active Directory Enumeration Tool" << std::endl;
-	std::wcout << L"  For authorized use on systems you have permission to test" << std::endl;
+	// ASCII art banner
 	std::wcout << L"" << std::endl;
-	std::wcout << L"  Usage: ADRecon.exe <module> [options]" << std::endl;
+	std::wcout << L"" << std::endl;
+	std::wcout << L"" << std::endl;
+	std::wcout << L"  __  __   _____   ___    ____      _      _   _ " << std::endl;
+	std::wcout << L"  __  __   _____   ___    ____      _      _   _ " << std::endl;
+	std::wcout << L" |  \\/  | | ____| |_ _|  / ___|    / \\    | \\ | |" << std::endl;
+	std::wcout << L" | |\\/| | |  _|    | |  | |  _    / _ \\   |  \\| |" << std::endl;
+	std::wcout << L" | |  | | | |___   | |  | |_| |  / ___ \\  | |\\  |" << std::endl;
+	std::wcout << L" |_|  |_| |_____| |___|  \\____| /_/   \\_\\ |_| \\_|" << std::endl;
+	std::wcout << L"" << std::endl;
+	std::wcout << L"  Active Directory Enumeration Tool  |  v0.1" << std::endl;
+	std::wcout << L"  by saretawa" << std::endl;
+	std::wcout << L"  For authorized use only" << std::endl;
+	std::wcout << L"" << std::endl;
+	std::wcout << L"  Usage: Meigan.exe <module> [options]" << std::endl;
 	std::wcout << L"" << std::endl;
 	std::wcout << L"  MODULES - CORE" << std::endl;
 	std::wcout << L"  --------------" << std::endl;
@@ -1957,21 +1971,21 @@ void PrintUsage() {
 	std::wcout << L"" << std::endl;
 	std::wcout << L"  EXAMPLES" << std::endl;
 	std::wcout << L"  --------" << std::endl;
-	std::wcout << L"    ADRecon.exe users                              Basic user enumeration" << std::endl;
-	std::wcout << L"    ADRecon.exe spns                               Find Kerberoastable accounts" << std::endl;
-	std::wcout << L"    ADRecon.exe laps                               Find readable LAPS passwords" << std::endl;
-	std::wcout << L"    ADRecon.exe finegrained                        PSOs and lockout thresholds" << std::endl;
-	std::wcout << L"    ADRecon.exe maq                                Machine account quota check" << std::endl;
-	std::wcout << L"    ADRecon.exe shares                             Non-default SMB shares" << std::endl;
-	std::wcout << L"    ADRecon.exe passnotchanged                     Passwords not changed in 365d" << std::endl;
-	std::wcout << L"    ADRecon.exe rbcd                               RBCD-configured objects" << std::endl;
-	std::wcout << L"    ADRecon.exe acls                               Full ACL scan" << std::endl;
-	std::wcout << L"    ADRecon.exe acls --dangerous                   Critical rights only" << std::endl;
-	std::wcout << L"    ADRecon.exe acls --trustee john.doe            What john.doe can do" << std::endl;
-	std::wcout << L"    ADRecon.exe acls --target administrator        Who can compromise admin" << std::endl;
-	std::wcout << L"    ADRecon.exe acls --detail bob                  Full ACL breakdown for bob" << std::endl;
-	std::wcout << L"    ADRecon.exe users --dc DC01.corp.com           Target specific DC" << std::endl;
-	std::wcout << L"    ADRecon.exe all --output full_recon.txt        Full domain dump to file" << std::endl;
+	std::wcout << L"    Meigan.exe users                              Basic user enumeration" << std::endl;
+	std::wcout << L"    Meigan.exe spns                               Find Kerberoastable accounts" << std::endl;
+	std::wcout << L"    Meigan.exe laps                               Find readable LAPS passwords" << std::endl;
+	std::wcout << L"    Meigan.exe finegrained                        PSOs and lockout thresholds" << std::endl;
+	std::wcout << L"    Meigan.exe maq                                Machine account quota check" << std::endl;
+	std::wcout << L"    Meigan.exe shares                             Non-default SMB shares" << std::endl;
+	std::wcout << L"    Meigan.exe passnotchanged                     Passwords not changed in 365d" << std::endl;
+	std::wcout << L"    Meigan.exe rbcd                               RBCD-configured objects" << std::endl;
+	std::wcout << L"    Meigan.exe acls                               Full ACL scan" << std::endl;
+	std::wcout << L"    Meigan.exe acls --dangerous                   Critical rights only" << std::endl;
+	std::wcout << L"    Meigan.exe acls --trustee john.doe            What john.doe can do" << std::endl;
+	std::wcout << L"    Meigan.exe acls --target administrator        Who can compromise admin" << std::endl;
+	std::wcout << L"    Meigan.exe acls --detail bob                  Full ACL breakdown for bob" << std::endl;
+	std::wcout << L"    Meigan.exe users --dc DC01.corp.com           Target specific DC" << std::endl;
+	std::wcout << L"    Meigan.exe all --output full_recon.txt        Full domain dump to file" << std::endl;
 	std::wcout << L"" << std::endl;
 }
 
@@ -2151,6 +2165,12 @@ void RunModule(std::string cmd, std::wstring baseDN, std::wstring customFilter, 
 }
 
 int main(int argc, char* argv[]) {
+	// Enable ANSI color codes in Windows console
+	HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+	DWORD dwMode = 0;
+	if (GetConsoleMode(hOut, &dwMode))
+		SetConsoleMode(hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+
 	HRESULT coHr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	if (FAILED(coHr) && coHr != RPC_E_CHANGED_MODE) {
 		wchar_t buf[64];
@@ -2159,7 +2179,8 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 
-	std::wcout << L"[+] ADRecon started" << std::endl;
+	std::wcout << L"  [ MEIGAN ]  AD Enumeration  v0.1  by saretawa" << std::endl;
+	std::wcout << L"" << std::endl;
 
 	if (argc < 2) { PrintUsage(); CoUninitialize(); return 0; }
 
