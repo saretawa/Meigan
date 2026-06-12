@@ -1,7 +1,7 @@
 ﻿  ADRecon.cpp
   Generating code
-  382 of 1222 functions (31.3%) were compiled, the rest were copied from previous compilation.
-    376 functions were new in current compilation
-    67 functions had inline decision re-evaluated but remain unchanged
+  3 of 1758 functions ( 0.2%) were compiled, the rest were copied from previous compilation.
+    0 functions were new in current compilation
+    28 functions had inline decision re-evaluated but remain unchanged
   Finished generating code
   ADRecon.vcxproj -> C:\Users\saretawa\source\repos\ADRecon\x64\Release\ADRecon.exe
