@@ -1,6 +1,6 @@
 # Meigan
 
-Active Directory enumeration tool. Single C++ binary over ADSI/LDAP and NetAPI — object enumeration, attack-surface discovery, ACL auditing, and host-level recon. No external dependencies.
+Active Directory enumeration tool. Single C++ binary over ADSI/LDAP and NetAPI object enumeration, attack-surface discovery, ACL auditing, and host-level recon. No external dependencies.
 
 > For authorized use only.
 
