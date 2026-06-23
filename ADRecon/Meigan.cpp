@@ -177,19 +177,14 @@ std::wstring DecodeTrustAttributes(DWORD a) {
 	return result.empty() ? L"NONE" : result;
 }
 
-// ============================================================
-// ACL helpers
-// ============================================================
 
-// Well-known extended right GUIDs
 struct ExtendedRightEntry {
 	const wchar_t* guid;
 	const wchar_t* name;
-	bool noise; // true = suppress from output
+	bool noise;
 };
 
 static ExtendedRightEntry gExtendedRights[] = {
-	// Offensive - surface these
 	{ L"{00299570-246d-11d0-a768-00aa006e0529}", L"ForceChangePassword",                    false },
 	{ L"{1131f6aa-9c07-11d1-f79f-00c04fc2dcd2}", L"DS-Replication-Get-Changes",             false },
 	{ L"{1131f6ad-9c07-11d1-f79f-00c04fc2dcd2}", L"DS-Replication-Get-Changes-All",         false },
@@ -197,7 +192,7 @@ static ExtendedRightEntry gExtendedRights[] = {
 	{ L"{0e10c968-78fb-11d2-90d4-00c04f79dc55}", L"Enroll",                                 false },
 	{ L"{a05b8cc2-17bc-4802-a710-e7c15ab866a2}", L"AutoEnroll",                             false },
 	{ L"{9923a32a-3607-11d2-b9be-0000f87a36b2}", L"DS-Install-Replica",                     false },
-	// Noise - suppress
+
 	{ L"{ab721a53-1e2f-11d0-9819-00aa0040529b}", L"User-Change-Password",                   true  },
 	{ L"{ab721a54-1e2f-11d0-9819-00aa0040529b}", L"Send-As",                                true  },
 	{ L"{ab721a56-1e2f-11d0-9819-00aa0040529b}", L"Receive-As",                             true  },
@@ -209,7 +204,6 @@ static ExtendedRightEntry gExtendedRights[] = {
 	{ L"{00000000-0000-0000-0000-000000000000}", L"AllExtendedRights",                      false },
 };
 
-// Returns empty string for noise GUIDs (caller should skip)
 std::wstring ResolveExtendedRight(const GUID* pGuid, bool& isNoise) {
 	isNoise = false;
 	wchar_t guidStr[64];
@@ -232,12 +226,11 @@ std::wstring ResolveExtendedRight(const GUID* pGuid, bool& isNoise) {
 			return e.noise ? L"" : e.name;
 		}
 	}
-	// Unknown GUID — suppress, likely a default attribute right
+	
 	isNoise = true;
 	return L"";
 }
 
-// Skip these trustees — default high-priv groups, noise
 bool IsDefaultTrustee(const std::wstring& name) {
 	static const wchar_t* defaults[] = {
 		L"NT AUTHORITY\\SYSTEM",
@@ -270,7 +263,6 @@ bool IsDefaultTrustee(const std::wstring& name) {
 	return false;
 }
 
-// Right severity ranking — lower = more dangerous
 int RightSeverity(const std::wstring& right) {
 	if (right.find(L"GenericAll") != std::wstring::npos)                           return 0;
 	if (right.find(L"WriteDACL") != std::wstring::npos)                            return 1;
@@ -295,7 +287,7 @@ bool IsDCSync(const std::wstring& right) {
 struct AclFinding {
 	std::wstring targetDN;
 	std::wstring targetSam;
-	std::wstring targetType; // USER / GROUP / COMPUTER
+	std::wstring targetType;
 	std::wstring trustee;
 	std::wstring right;
 	int severity;
@@ -405,13 +397,10 @@ void ParseDACL(
 
 		std::wstring trusteeName = SidToName(pTrusteeSid);
 
-		// Skip computer accounts as trustees (noise) unless explicitly filtering for one
 		if (skipComputers && filterTrustee.empty()) {
-			// heuristic: computer accounts end with $
 			if (!trusteeName.empty() && trusteeName.back() == L'$') continue;
 		}
 
-		// Skip default trustees unless explicitly asked via --trustee
 		if (filterTrustee.empty() && IsDefaultTrustee(trusteeName)) continue;
 
 		// --trustee filter
@@ -422,7 +411,6 @@ void ParseDACL(
 			if (tl.find(fl) == std::wstring::npos) continue;
 		}
 
-		// Deduplicate: skip if same target+trustee+right already recorded
 		std::wstring key = targetSam + L"|" + trusteeName + L"|" + rights;
 		bool seen = false;
 		for (auto& existing : findings)
@@ -447,7 +435,7 @@ void ParseDACL(
 void PrintChains(const std::vector<AclFinding>& findings) {
 	// Build trustee -> targets map
 	std::map<std::wstring, std::vector<std::wstring>> trusteeTargets;
-	std::map<std::wstring, std::wstring> samToTrustee; // sam -> display name of trustee
+	std::map<std::wstring, std::wstring> samToTrustee; 
 
 	for (auto& f : findings) {
 		std::wstring tl = f.trustee;
@@ -456,7 +444,6 @@ void PrintChains(const std::vector<AclFinding>& findings) {
 		samToTrustee[f.targetSam] = f.trustee;
 	}
 
-	// For each finding, check if target is also a trustee somewhere — chain detected
 	bool anyChain = false;
 	for (auto& f : findings) {
 		std::wstring tl = f.targetSam;
@@ -468,7 +455,6 @@ void PrintChains(const std::vector<AclFinding>& findings) {
 				*gOut << std::wstring(60, L'=') << std::endl;
 				anyChain = true;
 			}
-			// Print the chain: trustee -> target -> target's targets
 			for (auto& next : trusteeTargets[tl]) {
 				*gOut << L"\n  " << f.trustee
 					<< L"  -->  " << f.targetSam
@@ -539,7 +525,6 @@ void ACLEnum(std::wstring baseDN, std::wstring dc, std::wstring filterTrustee,
 		}
 		if (sam.empty()) sam = ouName; // OUs have no samAccountName
 		if (SUCCEEDED(pSearch->GetColumn(hSearch, (LPWSTR)L"objectClass", &col))) {
-			// multi-valued — last value is most specific
 			for (DWORD j = 0; j < col.dwNumValues; j++)
 				objClass = col.pADsValues[j].CaseIgnoreString;
 			pSearch->FreeColumn(&col);
@@ -582,8 +567,7 @@ void ACLEnum(std::wstring baseDN, std::wstring dc, std::wstring filterTrustee,
 	std::sort(findings.begin(), findings.end(), [](const AclFinding& a, const AclFinding& b) {
 		return a.severity < b.severity;
 		});
-
-	// ---- INBOUND: who has rights over what ----
+	
 	if (!findings.empty()) {
 		std::wcout << L"\x1b[96m"; *gOut << L"\n[ACL FINDINGS]"; std::wcout << L"\x1b[0m" << std::endl;
 		*gOut << std::wstring(60, L'-') << std::endl;
@@ -601,7 +585,6 @@ void ACLEnum(std::wstring baseDN, std::wstring dc, std::wstring filterTrustee,
 		*gOut << L"\n[ACL] No non-default interesting ACEs found" << std::endl;
 	}
 
-	// Attack path chains
 	if (filterTrustee.empty() && filterTarget.empty() && !findings.empty())
 		PrintChains(findings);
 
@@ -611,7 +594,6 @@ void ACLEnum(std::wstring baseDN, std::wstring dc, std::wstring filterTrustee,
 	LogResult(buf, findings.size() > 0 ? L"+" : L"!");
 }
 
-// ============================================================
 
 std::wstring GetDomainInfo(bool printbasic, std::wstring dc = L"") {
 	std::wstring rootDSEPath = dc.empty() ? L"LDAP://rootDSE" : L"LDAP://" + dc + L"/rootDSE";
@@ -891,9 +873,6 @@ void GPOMap(std::wstring baseDN, std::wstring dc = L"") {
 }
 
 
-// ============================================================
-// Sessions — NetSessionEnum / NetWkstaUserEnum per computer
-// ============================================================
 void SessionsEnum(std::wstring baseDN, std::wstring dc) {
 	// First collect computer list via LDAP
 	IDirectorySearch* pSearch = BindSearch(baseDN, dc);
@@ -959,9 +938,6 @@ void SessionsEnum(std::wstring baseDN, std::wstring dc) {
 	LogResult(buf, totalSessions > 0 ? L"+" : L"!");
 }
 
-// ============================================================
-// Local Admins — NetLocalGroupGetMembers per computer
-// ============================================================
 void LocalAdminsEnum(std::wstring baseDN, std::wstring dc) {
 	IDirectorySearch* pSearch = BindSearch(baseDN, dc);
 	if (!pSearch) return;
@@ -1038,9 +1014,6 @@ void LocalAdminsEnum(std::wstring baseDN, std::wstring dc) {
 	LogResult(buf, totalFindings > 0 ? L"+" : L"!");
 }
 
-// ============================================================
-// ACL Detail — full categorized ACL dump for one specific object
-// ============================================================
 void ACLDetail(std::wstring baseDN, std::wstring dc, std::wstring objectName) {
 	IDirectorySearch* pSearch = BindSearch(baseDN, dc);
 	if (!pSearch) return;
@@ -1116,7 +1089,6 @@ void ACLDetail(std::wstring baseDN, std::wstring dc, std::wstring objectName) {
 	*gOut << L"  DN:      " << dn << std::endl;
 	*gOut << L"  Owner:   " << ownerName << std::endl;
 
-	// Parse all ACEs — categorize into buckets
 	PACL pDacl = nullptr;
 	BOOL daclPresent = FALSE, daclDefaulted2 = FALSE;
 	GetSecurityDescriptorDacl(pSD, &daclPresent, &pDacl, &daclDefaulted2);
@@ -1168,7 +1140,6 @@ void ACLDetail(std::wstring baseDN, std::wstring dc, std::wstring objectName) {
 			std::wstring trusteeName = SidToName(pSid);
 			std::wstring prefix = isAllow ? L"ALLOW" : L"DENY ";
 
-			// Build rights string — full detail mode, include everything
 			std::wstring rights = prefix + L" | ";
 
 			// Generic
@@ -1235,7 +1206,6 @@ void ACLDetail(std::wstring baseDN, std::wstring dc, std::wstring objectName) {
 				else { rights += L"AllExtendedRights "; }
 			}
 
-			// Categorize — default trustees always go to DEFAULT regardless of rights
 			bool isDefault = IsDefaultTrustee(trusteeName);
 			AceEntry entry{ trusteeName, rights, isDefault };
 			int sev = RightSeverity(rights);
@@ -1290,11 +1260,7 @@ void ACLDetail(std::wstring baseDN, std::wstring dc, std::wstring objectName) {
 }
 
 
-// ============================================================
-// Fine-Grained Password Policies (PSOs)
-// ============================================================
 std::wstring FormatTimeSpan(LONGLONG interval) {
-	// interval is stored as negative 100-nanosecond intervals
 	if (interval == 0) return L"0";
 	LONGLONG secs = (interval < 0 ? -interval : interval) / 10000000LL;
 	LONGLONG mins = secs / 60; secs %= 60;
@@ -1308,7 +1274,6 @@ std::wstring FormatTimeSpan(LONGLONG interval) {
 }
 
 void FineGrainedEnum(std::wstring baseDN, std::wstring dc) {
-	// PSOs live in CN=Password Settings Container,CN=System,<baseDN>
 	std::wstring psoDN = L"CN=Password Settings Container,CN=System," + baseDN;
 	std::wstring ldapPath = dc.empty()
 		? L"LDAP://" + psoDN
@@ -1407,13 +1372,11 @@ void FineGrainedEnum(std::wstring baseDN, std::wstring dc) {
 			pSearch->FreeColumn(&col);
 		}
 
-		// ── Header ──
 		*gOut << L"\n  Policy:     " << name << std::endl;
 		*gOut << L"  Precedence: " << precedence
 			<< L"  (lower = higher priority)" << std::endl;
 		*gOut << std::wstring(60, L'-') << std::endl;
 
-		// ── Password settings ──
 		*gOut << L"  [Password Settings]" << std::endl;
 		*gOut << L"    Min Length:    " << minLen << std::endl;
 		*gOut << L"    History:       " << histLen << L" passwords remembered" << std::endl;
@@ -1421,8 +1384,7 @@ void FineGrainedEnum(std::wstring baseDN, std::wstring dc) {
 		*gOut << L"    Reversible:    " << (reversible ? L"YES (cleartext stored!)" : L"No") << std::endl;
 		*gOut << L"    Max Age:       " << (maxAge == 0 ? L"0 (never expires)" : FormatTimeSpan(maxAge)) << std::endl;
 		*gOut << L"    Min Age:       " << (minAge == 0 ? L"0 (no minimum)" : FormatTimeSpan(minAge)) << std::endl;
-
-		// ── Lockout settings — highlight spray-relevant info ──
+		
 		*gOut << L"\n  [Lockout Settings]" << std::endl;
 		if (lockoutThresh == 0) {
 			*gOut << L"    Threshold:     0  [!!!] NO LOCKOUT - safe to spray" << std::endl;
@@ -1433,7 +1395,6 @@ void FineGrainedEnum(std::wstring baseDN, std::wstring dc) {
 		*gOut << L"    Obs. Window:   " << (lockoutWindow == 0 ? L"N/A" : FormatTimeSpan(lockoutWindow)) << std::endl;
 		*gOut << L"    Duration:      " << (lockoutDur == 0 ? L"N/A" : FormatTimeSpan(lockoutDur)) << std::endl;
 
-		// ── Applies to ──
 		*gOut << L"\n  [Applies To]" << std::endl;
 		if (appliesTo.empty()) {
 			*gOut << L"    (none assigned)" << std::endl;
@@ -1454,13 +1415,6 @@ void FineGrainedEnum(std::wstring baseDN, std::wstring dc) {
 }
 
 
-// ============================================================
-// Shares — NetShareEnum per computer
-// ============================================================
-
-// ============================================================
-// Share Tree — recursive directory listing of a share path
-// ============================================================
 void PrintShareTree(const std::wstring& uncPath, int depth = 0) {
 	if (depth > 3) return; // max depth
 	std::wstring indent(depth * 2 + 6, L' ');
@@ -1641,9 +1595,7 @@ void SharesEnum(std::wstring baseDN, std::wstring dc) {
 	LogResult(buf, totalShares > 0 ? L"+" : L"!");
 }
 
-// ============================================================
-// Password Not Changed — pwdLastSet older than N days
-// ============================================================
+
 void PassNotChangedEnum(std::wstring baseDN, std::wstring dc, int days = 365) {
 	LONGLONG cutoff = DaysAgoFileTime(days);
 
@@ -1669,9 +1621,7 @@ void PassNotChangedEnum(std::wstring baseDN, std::wstring dc, int days = 365) {
 	ADSearch(baseDN, filterBuf, attrs, 7, header, dc);
 }
 
-// ============================================================
-// RBCD — resource-based constrained delegation
-// ============================================================
+
 void RBCDEnum(std::wstring baseDN, std::wstring dc) {
 	LPWSTR attrs[] = {
 		(LPWSTR)L"samAccountName",
@@ -1825,9 +1775,6 @@ void RBCDEnum(std::wstring baseDN, std::wstring dc) {
 	LogResult(buf, count > 0 ? L"+" : L"!");
 }
 
-// ============================================================
-// MAQ — Machine Account Quota
-// ============================================================
 void MAQEnum(std::wstring baseDN, std::wstring dc) {
 	std::wstring ldapPath = dc.empty()
 		? L"LDAP://" + baseDN
